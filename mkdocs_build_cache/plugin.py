@@ -93,7 +93,7 @@ class BuildCachePlugin(BasePlugin):
         # Process all files under docs_dir.
         docs_dir = config.get("docs_dir", "")
         for root, _, files in os.walk(docs_dir):
-            for file in files:
+            for file in sorted(files):  # sort files for deterministic ordering
                 file_path = os.path.join(root, file)
                 hash_file(file_path)
 
