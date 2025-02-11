@@ -2,15 +2,14 @@ import os
 import json
 import shutil
 import tempfile
+import glob
 
 import pytest
 
 from mkdocs.exceptions import Abort
 from mkdocs.config import Config
-from mkdocs.theme import Theme
-from mkdocs.plugins import BasePlugin
 
-from mkdocs_build_cache.plugin import BuildCachePlugin, BuildCacheAbort, MkDocsEncoder
+from mkdocs_build_cache.plugin import BuildCachePlugin, BuildCacheAbort
 
 
 @pytest.fixture
@@ -44,11 +43,22 @@ def temp_project_dir():
 def sample_config(temp_project_dir):
     """
     Return a minimal MkDocs config dictionary.
+    The config includes:
+      - docs_dir (the source files),
+      - site_name, and
+      - site_dir (the output directory) which is pre-populated to be nonempty.
     """
-    _, docs_dir = temp_project_dir
+    temp_dir, docs_dir = temp_project_dir
+    site_dir = os.path.join(temp_dir, "site")
+    os.makedirs(site_dir, exist_ok=True)
+    # Create a dummy file in site_dir so that it is nonempty.
+    dummy_file = os.path.join(site_dir, "dummy.html")
+    with open(dummy_file, "w", encoding="utf-8") as f:
+        f.write("<html></html>")
     config = {
         "docs_dir": docs_dir,
         "site_name": "Test Site",
+        "site_dir": site_dir,
     }
     return config
 
@@ -66,16 +76,43 @@ def test_compute_cache_id(sample_config, plugin_instance):
     """
     cache_id1 = plugin_instance.compute_cache_id(sample_config)
     assert isinstance(cache_id1, str)
-    # Cache id should be 64 hex characters for SHA-256.
+    # SHA-256 produces a 64-character hexadecimal digest.
     assert len(cache_id1) == 64
 
-    # Now modify a file and ensure the hash changes.
+    # Now modify a source file and ensure the hash changes.
     docs_dir = sample_config["docs_dir"]
     index_md = os.path.join(docs_dir, "index.md")
     with open(index_md, "a", encoding="utf-8") as f:
         f.write("\nAdditional content.")
 
     cache_id2 = plugin_instance.compute_cache_id(sample_config)
+    assert cache_id1 != cache_id2
+
+
+def test_compute_cache_id_with_include(sample_config, plugin_instance, temp_project_dir):
+    """
+    Test that compute_cache_id takes into account extra files specified by the
+    'include' configuration option (a list of glob patterns).
+    """
+    # Create an extra directory and file outside docs_dir.
+    temp_dir, _ = temp_project_dir
+    extras_dir = os.path.join(temp_dir, "extras")
+    os.makedirs(extras_dir, exist_ok=True)
+    extra_file = os.path.join(extras_dir, "extra.txt")
+    with open(extra_file, "w", encoding="utf-8") as f:
+        f.write("Extra content v1")
+
+    plugin_instance.config["include"] = [os.path.join("extras", "*.txt")]
+
+    cache_id1 = plugin_instance.compute_cache_id(sample_config)
+
+    # Now change the content of the extra file.
+    with open(extra_file, "w", encoding="utf-8") as f:
+        f.write("Extra content v2")
+
+    cache_id2 = plugin_instance.compute_cache_id(sample_config)
+
+    # The cache IDs should differ because the extra file's content changed.
     assert cache_id1 != cache_id2
 
 
@@ -99,7 +136,8 @@ def test_on_config_no_existing_cache(sample_config, plugin_instance):
 
 def test_on_config_with_valid_cache(sample_config, plugin_instance):
     """
-    Test that on_config raises BuildCacheAbort if the cache file exists and is valid.
+    Test that on_config raises BuildCacheAbort if the cache file exists, the cache ID is valid,
+    and the site_dir exists and is nonempty.
     """
     # First, compute the expected cache id.
     cache_id = plugin_instance.compute_cache_id(sample_config)
@@ -119,6 +157,58 @@ def test_on_config_with_valid_cache(sample_config, plugin_instance):
         os.remove(cache_file)
 
 
+def test_on_config_with_valid_cache_empty_site_dir(sample_config, plugin_instance, temp_project_dir):
+    """
+    Test that on_config does NOT abort when the cache is valid
+    if the site_dir exists but is empty.
+    """
+    # Compute the cache ID.
+    cache_id = plugin_instance.compute_cache_id(sample_config)
+    cache_file = plugin_instance.CACHE_FILE
+    with open(cache_file, "w", encoding="utf-8") as f:
+        json.dump({"cache_id": cache_id}, f)
+
+    # Create an empty site_dir.
+    temp_dir, _ = temp_project_dir
+    empty_site_dir = os.path.join(temp_dir, "empty_site")
+    os.makedirs(empty_site_dir, exist_ok=True)
+    # Ensure the directory is empty.
+    for f_name in os.listdir(empty_site_dir):
+        os.remove(os.path.join(empty_site_dir, f_name))
+
+    # Override the site_dir in the config.
+    sample_config["site_dir"] = empty_site_dir
+    config = sample_config.copy()
+    returned_config = plugin_instance.on_config(config)
+    assert "build_cache_id" in returned_config
+
+    # Clean up
+    if os.path.exists(cache_file):
+        os.remove(cache_file)
+
+
+def test_on_config_with_valid_cache_missing_site_dir(sample_config, plugin_instance):
+    """
+    Test that on_config does NOT abort when the cache is valid
+    if the site_dir is missing from the config.
+    """
+    # Compute the cache ID.
+    cache_id = plugin_instance.compute_cache_id(sample_config)
+    cache_file = plugin_instance.CACHE_FILE
+    with open(cache_file, "w", encoding="utf-8") as f:
+        json.dump({"cache_id": cache_id}, f)
+
+    # Remove site_dir from the config.
+    config = sample_config.copy()
+    config.pop("site_dir", None)
+    returned_config = plugin_instance.on_config(config)
+    assert "build_cache_id" in returned_config
+
+    # Clean up
+    if os.path.exists(cache_file):
+        os.remove(cache_file)
+
+
 def test_on_post_build(sample_config, plugin_instance):
     """
     Test that on_post_build writes the cache file with the correct build_cache_id.
@@ -127,7 +217,6 @@ def test_on_post_build(sample_config, plugin_instance):
     computed_id = plugin_instance.compute_cache_id(sample_config)
     sample_config["build_cache_id"] = computed_id
 
-    # Remove any existing cache file.
     cache_file = plugin_instance.CACHE_FILE
     if os.path.exists(cache_file):
         os.remove(cache_file)

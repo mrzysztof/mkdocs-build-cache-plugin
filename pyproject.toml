@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "mkdocs>=1.4.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mkdocs_build_cache_plugin_kmaliszewski"
+name = "mkdocs_build_cache_plugin"
 version = "0.1.0"
 authors = [
   { name="kmaliszewski", email="kmaliszewski.dev@gmail.com" },
@@ -15,8 +15,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-license = "MIT"
-license-files = ["LICEN[CS]E*"]
+license = { text = "MIT" }
 
 [project.entry-points."mkdocs.plugins"]
 build-cache = "mkdocs_build_cache.plugin:BuildCachePlugin"

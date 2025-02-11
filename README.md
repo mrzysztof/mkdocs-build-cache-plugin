@@ -1,74 +1,76 @@
 # MkDocs Build Cache Plugin
 
-A simple [MkDocs](https://www.mkdocs.org/) plugin to cache build outputs and skip rebuilds when nothing has changed. This plugin computes a unique hash based on your MkDocs configuration and source files, and only triggers a rebuild when changes are detected.
-
-## Features
-
-- **Build Caching:** Saves a cache file (`build_cache.json`) that stores a hash of the build configuration and source files.
-- **Skip Unnecessary Rebuilds:** If the computed hash matches the cache file from a previous build, the plugin will skip the rebuild process.
-- **Seamless MkDocs Integration:** Built as a standard MkDocs plugin that hooks into the `on_config` and `on_post_build` events.
+**MkDocs Build Cache Plugin** is a [MkDocs](https://www.mkdocs.org/) plugin that speeds up your documentation builds by caching the build state. It computes a unique hash based on your configuration, source files, and any additional files you wish to include. If nothing has changed since the last build and your output directory already contains valid content, the plugin can abort the build early, saving valuable time.
 
 ## Installation
+
+Install the plugin via pip:
 
 ```bash
 pip install mkdocs-build-cache-plugin
 ```
 
+Alternatively, add it to your project’s dependencies.
+
 ## Usage
 
-1. **Configure MkDocs:**
-   In your `mkdocs.yml`, add the plugin to your plugins list:
+To enable the plugin, add it to your `mkdocs.yml` configuration file. You can also pass an optional list of glob patterns to include additional files in the cache hash computation.
 
-   ```yaml
-   plugins:
-     - search
-     - build-cache
-   ```
+```yaml
+site_name: My Docs Site
 
-2. **Run MkDocs:**
-   When you run `mkdocs build`, the plugin will compute a cache ID based on your configuration and documentation files. If nothing has changed since the last build, the plugin will log a message and skip the rebuild.
+plugins:
+  - search
+  - build_cache:
+      include:
+        - "extras/*.txt"
+        - "assets/**/*.css"
+```
 
-## How It Works
+### How It Works
 
-- **on_config:**
-  During the configuration phase, the plugin computes a SHA-256 hash of your MkDocs configuration and the content of all files in the `docs_dir`.
+1. **Cache ID Calculation:**  
+   When MkDocs starts, the plugin calculates a unique cache ID based on:
 
-  - If a cache file (`build_cache.json`) exists and its stored hash matches the computed hash, the plugin raises a `BuildCacheAbort` exception to skip the build.
-  - Otherwise, it sets the `build_cache_id` in the configuration.
+   - The main configuration file (if available).
+   - All files under your `docs_dir`.
+   - Any extra files that match the glob patterns provided in the `include` option.
 
-- **on_post_build:**
-  After a successful build, the plugin writes the computed hash to `build_cache.json` for future comparisons.
+2. **Build Skipping:**
+   - If a cache file exists and its cache ID matches the newly computed one **and** the output directory (`site_dir`) exists and is nonempty, the plugin raises an abort exception. This tells MkDocs that the build is up to date, and it can safely skip rebuilding.
+   - Otherwise, the build proceeds normally. After a successful build, the plugin updates the cache file with the new cache ID.
 
-## Development and Testing
+## Configuration Options
 
-The project uses [pytest](https://docs.pytest.org/) for testing. To run the tests:
+### `include`
 
-1. Install the development dependencies:
+- **Type:** `List[str]`
+- **Default:** `[]`
+- **Description:**  
+  A list of glob patterns specifying extra files to be included in the cache hash computation. For example:
 
-   ```bash
-   pip install -r requirements/dev.txt
-   ```
+  ```yaml
+  include:
+    - "extras/*.txt"
+    - "assets/**/*.css"
+  ```
 
-2. Run the tests:
+## Development
 
-   ```bash
-   pytest
-   ```
+To run tests locally, ensure you have [pytest](https://docs.pytest.org/) installed and run:
+
+```bash
+pytest
+```
+
+## Logging
+
+This plugin uses the `mkdocs.plugins` logger namespace. You can control the log output via MkDocs’ verbosity flags (e.g., `--verbose` or `--debug`).
 
 ## Contributing
 
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature/my-new-feature`).
-3. Commit your changes (`git commit -am 'Add new feature'`).
-4. Push to the branch (`git push origin feature/my-new-feature`).
-5. Create a new Pull Request.
+Contributions, suggestions, and bug reports are welcome! Please open an issue or submit a pull request in the project's repository.
 
 ## License
 
-This project is licensed under the MIT License.
-
-## Acknowledgments
-
-- [MkDocs](https://www.mkdocs.org/) for the excellent static site generator.
+This project is licensed under the [MIT License](LICENSE).
